@@ -12,7 +12,7 @@ c.SSOAuthenticator.admin_users = {'dpiparo', 'etejedor'}
 
 # Spawner
 c.JupyterHub.spawner_class = 'cernspawner.CERNSpawner'
-c.CERNSpawner.container_image = "cernphsft/systemuser"
+c.CERNSpawner.container_image = "cernphsft/systemuser-cc7:latest"
 c.CERNSpawner.read_only_volumes = { '/cvmfs':'/cvmfs' }
 c.CERNSpawner.volumes = { '/eos' : '/eos'}
 c.CERNSpawner.auth_script  = '/root/eos-fuse.sh'
