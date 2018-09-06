@@ -67,6 +67,12 @@ class CERNSpawner(SystemUserSpawner):
         help='Script to authenticate.'
     )
 
+    hadoop_auth_script = Unicode(
+        default_value='',
+        config=True,
+        help='Script to authenticate with hadoop clusters.'
+    )
+
     local_home = Bool(
         default_value=False,
         config=True,
@@ -192,10 +198,11 @@ class CERNSpawner(SystemUserSpawner):
             self.extra_host_config['port_bindings'][self.port] = (self.host_ip,)
 
         if self.offload:
-            env['SPARK_CLUSTER_NAME'] = self.user_options[self.spark_cluster_field]
-            env['SERVER_HOSTNAME']    = os.uname().nodename
-            env['MAX_MEMORY']         = self.user_options[self.user_memory]
-            env['KRB5CCNAME']         =  '/tmp/krb5cc_' + self.user.name
+            env['SPARK_CLUSTER_NAME'] 		= self.user_options[self.spark_cluster_field]
+            env['SERVER_HOSTNAME']   	 	= os.uname().nodename
+            env['MAX_MEMORY']         		= self.user_options[self.user_memory]
+            env['KRB5CCNAME']         		=  '/tmp/krb5cc_' + self.user.name
+            env['HADOOP_TOKEN_FILE_LOCATION']   =  '/spark/' + self.user.name + '.toks'
 
             # Asks the OS for random ports to give them to Docker,
             # so that Spark can be exposed to the outside
@@ -251,6 +258,10 @@ class CERNSpawner(SystemUserSpawner):
             # When using CERNBox as home, obtain credentials for the user
             subprocess.call(['sudo', self.auth_script, username])
             self.log.debug("We are in CERNSpawner. Credentials for %s were requested.", username)
+
+        if self.offload:
+            # subprocess.call(['sudo', '/srv/jupyterhub/private/get_hdfs_tokens.sh' , self.lcg_view_path + '/' + self.user_options[self.lcg_rel_field] + '/' + self.user_options[self.platform_field], self.user_options[self.spark_cluster_field], username])
+            subprocess.call(['sudo', self.hadoop_auth_script , self.lcg_view_path + '/' + self.user_options[self.lcg_rel_field] + '/' + self.user_options[self.platform_field], self.user_options[self.spark_cluster_field], username])
 
         # Due to dockerpy limitations in the current version, we cannot use --cpu to limit cpu.
         # This is an alternative (and old) way of doing it
