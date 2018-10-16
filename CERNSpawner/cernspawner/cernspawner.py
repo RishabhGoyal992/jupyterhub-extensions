@@ -262,9 +262,11 @@ class CERNSpawner(SystemUserSpawner):
         if self.offload:
            subprocess.call(['sudo', self.hadoop_auth_script , self.lcg_view_path + '/' + self.user_options[self.lcg_rel_field] + '/' + self.user_options[self.platform_field], self.user_options[self.spark_cluster_field], username])
            # rc = subprocess.Popen(['sudo', self.hadoop_auth_script, self.lcg_view_path + '/' + self.user_options[self.lcg_rel_field] + '/' + self.user_options[self.platform_field], self.user_options[self.spark_cluster_field], username], stdout=subprocess.PIPE)
+           """
            with open('/spark/'+username+'_webhdfs.toks', 'r') as myfile:
            	webhdfs_token=myfile.read()
            env['WEBHDFS_TOKEN'] = webhdfs_token
+           """
 
         # Due to dockerpy limitations in the current version, we cannot use --cpu to limit cpu.
         # This is an alternative (and old) way of doing it
