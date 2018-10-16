@@ -203,6 +203,7 @@ class CERNSpawner(SystemUserSpawner):
             env['MAX_MEMORY']         		= self.user_options[self.user_memory]
             env['KRB5CCNAME']         		=  '/tmp/krb5cc_' + self.user.name
             env['HADOOP_TOKEN_FILE_LOCATION']   =  '/spark/' + self.user.name + '.toks'
+            env['WEBHDFS_TOKEN']   		=  'KgAIcGtvdGh1cmkEeWFybgVoc3dhbooBZntEVeWKAWafUNnljUZ5SY4IFBQXbajC8VcD-R1vXf0sOdenvM5L6BJXRUJIREZTIGRlbGVnYXRpb24PMTAuMjEuMi42ODo5MDAw'
 
             # Asks the OS for random ports to give them to Docker,
             # so that Spark can be exposed to the outside
