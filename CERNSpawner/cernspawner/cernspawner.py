@@ -203,7 +203,6 @@ class CERNSpawner(SystemUserSpawner):
             env['MAX_MEMORY']         		= self.user_options[self.user_memory]
             env['KRB5CCNAME']         		=  '/tmp/krb5cc_' + self.user.name
             env['HADOOP_TOKEN_FILE_LOCATION']   =  '/spark/' + self.user.name + '.toks'
-            env['WEBHDFS_TOKEN']   		=  'KgAIcGtvdGh1cmkEeWFybgVoc3dhbooBZntEVeWKAWafUNnljUZ5SY4IFBQXbajC8VcD-R1vXf0sOdenvM5L6BJXRUJIREZTIGRlbGVnYXRpb24PMTAuMjEuMi42ODo5MDAw'
 
             # Asks the OS for random ports to give them to Docker,
             # so that Spark can be exposed to the outside
@@ -261,8 +260,11 @@ class CERNSpawner(SystemUserSpawner):
             self.log.debug("We are in CERNSpawner. Credentials for %s were requested.", username)
 
         if self.offload:
-            # subprocess.call(['sudo', '/srv/jupyterhub/private/get_hdfs_tokens.sh' , self.lcg_view_path + '/' + self.user_options[self.lcg_rel_field] + '/' + self.user_options[self.platform_field], self.user_options[self.spark_cluster_field], username])
-            subprocess.call(['sudo', self.hadoop_auth_script , self.lcg_view_path + '/' + self.user_options[self.lcg_rel_field] + '/' + self.user_options[self.platform_field], self.user_options[self.spark_cluster_field], username])
+           subprocess.call(['sudo', self.hadoop_auth_script , self.lcg_view_path + '/' + self.user_options[self.lcg_rel_field] + '/' + self.user_options[self.platform_field], self.user_options[self.spark_cluster_field], username])
+           # rc = subprocess.Popen(['sudo', self.hadoop_auth_script, self.lcg_view_path + '/' + self.user_options[self.lcg_rel_field] + '/' + self.user_options[self.platform_field], self.user_options[self.spark_cluster_field], username], stdout=subprocess.PIPE)
+           with open('/spark/'+username+'_webhdfs.toks', 'r') as myfile:
+           	webhdfs_token=myfile.read()
+           env['WEBHDFS_TOKEN'] = webhdfs_token
 
         # Due to dockerpy limitations in the current version, we cannot use --cpu to limit cpu.
         # This is an alternative (and old) way of doing it
