@@ -166,11 +166,9 @@ class CERNSpawner(SystemUserSpawner):
         options[self.lcg_rel_field]         = formdata[self.lcg_rel_field][0]
         options[self.platform_field]        = formdata[self.platform_field][0]
         options[self.user_script_env_field] = formdata[self.user_script_env_field][0]
-        options[self.spark_cluster_field]   = formdata[self.spark_cluster_field][0] if self.spark_cluster_field in formdata.keys() else 'none'
+        options[self.spark_cluster_field]   = formdata[self.spark_cluster_field][0] if self.spark_cluster_field in formdata.keys() else 'local'
         options[self.user_n_cores]          = int(formdata[self.user_n_cores][0]) if formdata[self.user_n_cores][0] in self.available_cores else int(self.available_cores[0])
         options[self.user_memory]           = formdata[self.user_memory][0] + 'g' if formdata[self.user_memory][0] in self.available_memory else self.available_memory[0] + 'g'
-
-        self.offload = options[self.spark_cluster_field] != 'none'
 
         return options
 
@@ -209,24 +207,34 @@ class CERNSpawner(SystemUserSpawner):
         if not self.use_internal_ip:
             self.extra_host_config['port_bindings'][self.port] = (self.host_ip,)
 
-        if self.offload:
-            cluster = self.user_options[self.spark_cluster_field]
-            env['SPARK_CLUSTER_NAME'] 		    = cluster
-            env['SPARK_USER'] 		            = username
-            env['SERVER_HOSTNAME']   	 	    = os.uname().nodename
-            env['MAX_MEMORY']         	   	    = self.user_options[self.user_memory]
+        cluster = self.user_options[self.spark_cluster_field]
+        env['SPARK_CLUSTER_NAME'] 		    = cluster
+        env['SPARK_USER'] 		            = username
+        env['SERVER_HOSTNAME']   	 	    = os.uname().nodename
+        env['MAX_MEMORY']         	   	    = self.user_options[self.user_memory]
 
-            env['SPARK_CONFIG_SCRIPT'] = self.spark_config_script
+        # Set proper SPARK_CONFIG_SCRIPT and HDFS_CLUSTER_NAME (and ensure they are properly cleared)
+        env['SPARK_CONFIG_SCRIPT'] = self.spark_config_script
+        env.pop('HDFS_CLUSTER_NAME', None)
+        if cluster.startswith("local"):
+            # local has no hdfs access
+            pass
+        elif cluster.startswith("k8s"):
+            # k8s has no hdfs access
+            pass
+        else:
+            # configure spark and hdfs for yarn
+            env['HDFS_CLUSTER_NAME'] = cluster
 
-            # Asks the OS for random ports to give them to Docker,
-            # so that Spark can be exposed to the outside
-            # Reserves the ports so that other processes don't use them
-            # before Docker opens them
-            for i in range(1, self.session_num_ports + 1):
-                reserved_port =  self.get_reserved_port()
-                env["SPARK_PORT_{port_idx}".format(port_idx=i)] = reserved_port
-                self.extra_host_config['port_bindings'][reserved_port] = reserved_port
-                self.extra_create_kwargs['ports'].append(reserved_port)
+        # Asks the OS for random ports to give them to Docker,
+        # so that Spark can be exposed to the outside
+        # Reserves the ports so that other processes don't use them
+        # before Docker opens them
+        for i in range(1, self.session_num_ports + 1):
+            reserved_port =  self.get_reserved_port()
+            env["SPARK_PORT_{port_idx}".format(port_idx=i)] = reserved_port
+            self.extra_host_config['port_bindings'][reserved_port] = reserved_port
+            self.extra_create_kwargs['ports'].append(reserved_port)
 
         return env
 
@@ -280,56 +288,59 @@ class CERNSpawner(SystemUserSpawner):
             self.log.debug("We are in CERNSpawner. Credentials for %s were requested.", username)
 
         # If the user selects a Spark Cluster we need to generate a token to allow him in
-        if self.offload:
-            # FIXME: temporaly limit Cloud Container to specific platform and software stack
-            if cluster.startswith('k8s') and (platform != "x86_64-centos7-gcc7-opt" or "dev" not in lcg_rel):
-                msg = "Configuration unsupported: only <b>Software stack: Development Bleeding Edge</b> with <b>Platform: 86_64-centos7-gcc7-opt</b> is supported for Cloud Containers"
-                raise ValueError(msg)
+        # FIXME: temporaly limit Cloud Container to specific platform and software stack
+        if cluster.startswith('k8s') and (platform != "x86_64-centos7-gcc7-opt" or "dev" not in lcg_rel):
+            msg = "Configuration unsupported: only <b>Software stack: Development Bleeding Edge</b> with <b>Platform: 86_64-centos7-gcc7-opt</b> is supported for Cloud Containers"
+            raise ValueError(msg)
 
-            # If the user selects a Spark Cluster we need to generate some tokens
-            # FIXME: Dont hardcode hadoop path, use hadoop_host_path and hadoop_container_path
-            hadoop_host_path = '/spark/' + username
-            hadoop_container_path = '/spark'
+        # If the user selects a Spark Cluster we need to generate some tokens
+        # FIXME: Dont hardcode hadoop path, use hadoop_host_path and hadoop_container_path
+        hadoop_host_path = '/spark/' + username
+        hadoop_container_path = '/spark'
 
-            # Ensure that env variables are properly cleared
-            self.env.pop('WEBHDFS_TOKEN', None)
-            self.env.pop('HADOOP_TOKEN_FILE_LOCATION', None)
-            self.env.pop('KUBECONFIG', None)
+        # ensure that env variables are properly cleared
+        self.env.pop('KRB5CCNAME', None)
+        self.env.pop('WEBHDFS_TOKEN', None)
+        self.env.pop('HADOOP_TOKEN_FILE_LOCATION', None)
+        self.env.pop('KUBECONFIG', None)
 
-            # Set authentication and authorization for the user
-            if cluster == 'k8s':
-                subprocess.call([
-                    'sudo',
-                    self.init_k8s_user,
-                    username,
-                    hadoop_host_path + '/k8s-user.config'
-                ])
+        # Set authentication and authorization for the user, ensure that env variables are properly cleared
+        if cluster.startswith("local"):
+            # Set default location for krb5cc
+            self.env['KRB5CCNAME'] = '/tmp/krb5cc'
+        elif cluster.startswith("k8s"):
+            subprocess.call([
+                'sudo',
+                self.init_k8s_user,
+                username,
+                hadoop_host_path + '/k8s-user.config'
+            ])
 
-                # set location of user kubeconfig for Spark
-                self.env['KUBECONFIG'] = hadoop_container_path + '/k8s-user.config'
+            # set location of user kubeconfig for Spark
+            self.env['KUBECONFIG'] = hadoop_container_path + '/k8s-user.config'
 
-                # Set default EOS krb5 cache location to hadoop container path for k8s
-                self.env['KRB5CCNAME'] = hadoop_container_path + '/krb5cc'
-            else:
-                subprocess.call([
-                    'sudo',
-                    self.hadoop_auth_script ,
-                    self.lcg_view_path + '/' + lcg_rel + '/' + platform,
-                    cluster,
-                    username
-                ])
+            # Set default EOS krb5 cache location to hadoop container path for k8s
+            self.env['KRB5CCNAME'] = hadoop_container_path + '/krb5cc'
+        else:
+            subprocess.call([
+                'sudo',
+                self.hadoop_auth_script ,
+                self.lcg_view_path + '/' + lcg_rel + '/' + platform,
+                cluster,
+                username
+            ])
 
-                # read the generated webhdfs token from host into env variable used by Spark
-                if os.path.exists(hadoop_host_path + '/webhdfs.toks'):
-                    with open(hadoop_host_path + '/webhdfs.toks', 'r') as webhdfs_token_file:
-                        self.env['WEBHDFS_TOKEN'] = webhdfs_token_file.read()
+            # read the generated webhdfs token from host into env variable used by Spark
+            if os.path.exists(hadoop_host_path + '/webhdfs.toks'):
+                with open(hadoop_host_path + '/webhdfs.toks', 'r') as webhdfs_token_file:
+                    self.env['WEBHDFS_TOKEN'] = webhdfs_token_file.read()
 
-                # set location of hadoop token file for Spark
-                if os.path.exists(hadoop_host_path + '/hadoop.toks'):
-                    self.env['HADOOP_TOKEN_FILE_LOCATION'] = hadoop_container_path + '/hadoop.toks'
+            # set location of hadoop token file for Spark
+            if os.path.exists(hadoop_host_path + '/hadoop.toks'):
+                self.env['HADOOP_TOKEN_FILE_LOCATION'] = hadoop_container_path + '/hadoop.toks'
 
-                # Set default location for krb5cc in tmp directory for yarn
-                self.env['KRB5CCNAME'] = '/tmp/krb5cc'
+            # Set default location for krb5cc in tmp directory for yarn
+            self.env['KRB5CCNAME'] = '/tmp/krb5cc'
 
         # Due to dockerpy limitations in the current version, we cannot use --cpu to limit cpu.
         # This is an alternative (and old) way of doing it
@@ -338,11 +349,6 @@ class CERNSpawner(SystemUserSpawner):
             'cpu_quota' : 100000 * cpu_quota,
             'mem_limit' : mem_limit
         }
-
-        # Temporary fix to have both slc6 and cc7 image available. It should be removed
-        # as soon as we move to cc7 completely.
-        if "centos7" in self.user_options[self.platform_field]:
-            image = "gitlab-registry.cern.ch/swan/docker-images/systemuser:v4.1"
 
         self.send_metrics()
 
